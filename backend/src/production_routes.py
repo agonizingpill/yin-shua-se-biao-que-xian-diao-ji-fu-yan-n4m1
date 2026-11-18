@@ -5,9 +5,10 @@ from .db import db_session
 from .auth import current,writers,admin
 from .schemas import ProofInput
 from .production_models import PlateSet,PressSample,PressHold
-from .production_schemas import PlateInput,MeasurementInput,SampleInput,HoldClose
+from .drift_models import DriftCycle
+from .production_schemas import PlateInput,MeasurementInput,SampleInput,HoldClose,DriftClear
 from .services import pack
-from . import plate_service,sampling_service
+from . import plate_service,sampling_service,drift_service
 router=APIRouter();queue=redis.Redis.from_url(os.environ['REDIS_URL'],decode_responses=True)
 @router.get('/plates')
 def plates(s=Depends(db_session),u=Depends(current)):return [pack(x) for x in s.scalars(select(PlateSet).order_by(PlateSet.id.desc()))]
@@ -27,3 +28,8 @@ def holds(s=Depends(db_session),u=Depends(current)):return [pack(x) for x in s.s
 def recheck(key:int,p:ProofInput,s=Depends(db_session),u=Depends(writers)):return pack(sampling_service.recheck(s,key,p,u,queue))
 @router.post('/press-holds/{key}/close')
 def close(key:int,p:HoldClose,s=Depends(db_session),u=Depends(admin)):return pack(sampling_service.close(s,key,p,u))
+@router.get('/drift-cycles')
+def drift_cycles(s=Depends(db_session),u=Depends(current)):return [pack(x) for x in s.scalars(select(DriftCycle).order_by(DriftCycle.id.desc()))]
+@router.post('/drift-cycles/{key}/clear')
+def drift_clear(key:int,p:DriftClear,s=Depends(db_session),u=Depends(admin)):
+    old,new=drift_service.clear(s,key,p,u);s.commit();return {'closed':pack(old),'new_cycle':pack(new)}

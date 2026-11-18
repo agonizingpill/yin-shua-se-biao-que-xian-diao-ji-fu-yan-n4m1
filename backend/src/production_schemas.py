@@ -24,3 +24,10 @@ class HoldClose(Inputs):
     def reason(cls,v):
         if len(v.strip())<5:raise ValueError('处置依据至少5字')
         return v.strip()
+class DriftClear(Inputs):
+    resolution:str=Field(min_length=5,max_length=500)
+    @field_validator('resolution')
+    @classmethod
+    def reason(cls,v):
+        if len(v.strip())<5:raise ValueError('调机解除依据至少5字')
+        return v.strip()

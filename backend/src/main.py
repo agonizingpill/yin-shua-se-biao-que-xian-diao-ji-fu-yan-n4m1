@@ -1,7 +1,7 @@
 import os,logging
 from contextlib import asynccontextmanager
 import redis
-from sqlalchemy import select
+from sqlalchemy import select,text
 from sqlalchemy.exc import IntegrityError
 from fastapi import FastAPI,Depends,HTTPException
 from fastapi.responses import JSONResponse
@@ -17,9 +17,24 @@ from .plate_service import require_ready
 from .paper_service import locked
 from .constants import ROLES,DEFECTS,JOB_STATES,ADJUSTMENT_STATES
 r=redis.Redis.from_url(os.environ['REDIS_URL'],decode_responses=True)
+def ensure_columns():
+    # 新3列对既有 press_samples 做幂等补列，保留历史抽检；drift_cycles 由 create_all 新建
+    from .production_models import PressSample
+    from .drift_models import DriftCycle
+    Base.metadata.create_all(engine)
+    added={'cycle_id':'INTEGER NULL','drift_state':"VARCHAR(24) DEFAULT ''",'drift_evidence':'JSON NULL'}
+    with engine.begin() as conn:
+        if engine.dialect.name=='sqlite':
+            existing={row[1]for row in conn.execute(text("PRAGMA table_info('press_samples')"))}
+            for col,ddl in added.items():
+                if col not in existing:conn.execute(text(f'ALTER TABLE press_samples ADD COLUMN {col} {ddl}'))
+        else:
+            existing={row[1]for row in conn.execute(text("SHOW COLUMNS FROM press_samples"))}
+            for col,ddl in added.items():
+                if col not in existing:conn.execute(text(f'ALTER TABLE press_samples ADD COLUMN {col} {ddl}'))
 @asynccontextmanager
 async def lifespan(app):
-    Base.metadata.create_all(engine)
+    ensure_columns()
     if os.getenv('SEED_DEMO','true')=='true':
         try:
             from scripts.seed_demo import seed

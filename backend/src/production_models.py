@@ -18,9 +18,12 @@ class PressSample(Base):
     job_id:Mapped[int]=mapped_column(ForeignKey('print_jobs.id'))
     proof_id:Mapped[int]=mapped_column(ForeignKey('proof_sheets.id'),unique=True)
     plate_id:Mapped[int]=mapped_column(ForeignKey('plate_sets.id'))
+    cycle_id:Mapped[int|None]=mapped_column(ForeignKey('drift_cycles.id'),nullable=True)
     sequence:Mapped[int]=mapped_column()
     quantity:Mapped[int]=mapped_column()
     state:Mapped[str]=mapped_column(String(24),default='classifying')
+    drift_state:Mapped[str]=mapped_column(String(24),default='')  # ''待判读 / stable / drift / skipped
+    drift_evidence:Mapped[dict|None]=mapped_column(JSON,nullable=True)
     plate_snapshot:Mapped[dict]=mapped_column(JSON)
 class PressHold(Base):
     __tablename__='press_holds'

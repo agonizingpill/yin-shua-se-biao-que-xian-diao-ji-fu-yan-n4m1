@@ -4,6 +4,7 @@ from .models import PrintJob,ProofSheet
 from .production_models import PressSample,PressHold
 from .services import get,audit,now,pack
 from .plate_service import require_ready
+from . import drift_service
 
 def queue(s,proof,r):
     # Save before enqueue so the worker can see the new proof. A failed queue write
@@ -27,16 +28,21 @@ def sample(s,p,u,r):
     if s.scalar(select(ProofSheet).where(ProofSheet.code==p.code)):raise HTTPException(409,'量产抽检必须使用新的唯一色标编号')
     values=p.model_dump();seq=values.pop('sequence');qty=values.pop('quantity')
     proof=ProofSheet(**values,classification_state='classifying');s.add(proof);s.flush()
-    item=PressSample(job_id=job.id,proof_id=proof.id,plate_id=plate.id,sequence=seq,quantity=qty,plate_snapshot={'version':plate.version,'registration_error_mm':plate.registration_error_mm,'source_note':plate.source_note,'approved_by':plate.approved_by});s.add(item)
+    item=PressSample(job_id=job.id,proof_id=proof.id,plate_id=plate.id,sequence=seq,quantity=qty,plate_snapshot={'version':plate.version,'registration_error_mm':plate.registration_error_mm,'source_note':plate.source_note,'approved_by':plate.approved_by});s.add(item);s.flush()
+    drift_service.bind_sample(s,job,item,u)
     audit(s,u,f'量产抽检 工单{job.code} 序{seq} 已印{qty}张 色标{proof.code}');queue(s,proof,r);return item
 
 def finish(s,proof):
     item=s.scalar(select(PressSample).where(PressSample.proof_id==proof.id).with_for_update())
     if not item or item.state!='classifying':return
     job=s.scalar(select(PrintJob).where(PrintJob.id==item.job_id).with_for_update())
-    if proof.classification_state=='classified' and proof.pass_flag and proof.defect=='合格':item.state='passed';return
-    item.state='held';job.status='hold'
-    hold=PressHold(job_id=job.id,sample_id=item.id,reason='量产抽检 '+proof.code+' / '+(proof.defect or '判读失败'),created_at=now(),reproof_ids=[]);s.add(hold)
+    if proof.classification_state=='classified' and proof.pass_flag and proof.defect=='合格':
+        item.state='passed'
+    else:
+        item.state='held';job.status='hold'
+        hold=PressHold(job_id=job.id,sample_id=item.id,reason='量产抽检 '+proof.code+' / '+(proof.defect or '判读失败'),created_at=now(),reproof_ids=[]);s.add(hold)
+    # 缺陷仍走原停机处置；漂移按取样序号累计证据，单张波动不触发
+    drift_service.ingest(s,item,proof)
 
 def recheck(s,key,p,u,r):
     current=get(s,PressHold,key)

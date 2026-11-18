@@ -5,10 +5,12 @@ from .production_models import PressSample,PressHold
 from .dispatch_models import PrintPack,PrintShipment,ShipmentPack
 from .paper_service import locked,net_paper
 from .services import audit
+from . import drift_service
 
 def gate(s,j):
     if j.status!='production' or s.scalar(select(PressHold.id).where(PressHold.job_id==j.id,PressHold.state=='active')):raise HTTPException(409,'须无活动停机单的量产工单')
     if s.scalar(select(PressSample.id).where(PressSample.job_id==j.id,PressSample.state=='classifying')):raise HTTPException(409,'抽检待判读，不能封箱或发货')
+    drift_service.gate(s,j)  # 基线不足暂停放行；漂移预警冻结封箱发货（与判读并发，工单行锁串行不漏拦截）
     sample=s.scalar(select(PressSample).where(PressSample.job_id==j.id,PressSample.state=='passed').order_by(PressSample.sequence.desc()))
     if not sample:raise HTTPException(409,'须有合格量产抽检才可装箱发货')
     proof=s.get(ProofSheet,sample.proof_id)
